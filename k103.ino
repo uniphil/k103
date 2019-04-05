@@ -25,13 +25,27 @@
  * 
  * command set:
  * 
- * Reels
- * - load film (ts, desc, len, curr frame)
+ * Reels (DC1)
+ * - load film
+ *    DC1 '!' 'C|P'N ts(4) desc(8) len(4)
+ *    c|k => camera | projector
+ *    N => always 0
  * 
- * Frames
- * - bolex: capture frame
- * - k103: advance reel
- * - k103: reverse reel
+ * - get film
+ *    DC1 '?' 'C|P'N
+ * 
+ * Frames (DC2)
+ * - bolex: capture frames
+ *    DC2 '*' N
+ * 
+ * - k103: advance frames
+ *    DC2 'F' N
+ * 
+ * - k103: reverse frames
+ *    DC2 'R' N
+ * 
+ * - get frame number
+ *    DC2 '?'
  * 
  * EEPROM shape
  * 
@@ -49,7 +63,11 @@
 // 20-byte extra gap: can add features if needed without having to realign
 // or even, add a second camera?
 
+#define ASCII_DC1 0x11
+#define ASCII_DC2 0x12
+
 struct Reel {
+  uint16_t offset;
   unsigned long ts;
   char desc[8];
   long len;
@@ -60,10 +78,24 @@ Reel bolex;
 Reel k103;
 
 void restore_reel_state(Reel * r, uint16_t eep_offset) {
+  r->offset = eep_offset;
   EEPROM.get(eep_offset + 0, r->ts);
   EEPROM.get(eep_offset + 4, r->desc);
   EEPROM.get(eep_offset + 12, r->len);
   EEPROM.get(eep_offset + 16, r->frame);
+}
+
+void load_film(Reel * r, unsigned long ts, char desc[8], long len, long frame=0) {
+  r->ts = ts;
+  strncpy(desc, r->desc, 8);
+  r->len = len;
+  r->frame = frame;
+
+  uint16_t eep_offset = r->offset;
+  EEPROM.put(eep_offset + 0, r->ts);
+  EEPROM.put(eep_offset + 4, r->desc);
+  EEPROM.put(eep_offset + 12, r->len);
+  EEPROM.put(eep_offset + 16, r->frame);
 }
 
 void setup() {
@@ -86,6 +118,10 @@ void setup() {
 
   Serial.begin(9600);
   Serial.println("hello");
+  Serial.println(bolex.ts);
+  Serial.println(bolex.desc);
+  Serial.println(bolex.len);
+  Serial.println(bolex.frame);
 }
 
 void fwd_isr() {
@@ -93,9 +129,67 @@ void fwd_isr() {
 void rev_isr() {
 }
 
+void forward(Reel * r, uint8_t n) {
+  digitalWrite(K103_REVERSE, HIGH);
+  // TODO: only wait if we're actually flipping it
+  delay(30);
+  analogWrite(K103_TAKEUP, 80);
+  digitalWrite(K103_ADVANCE, HIGH);
+  delay(30);
+  digitalWrite(K103_ADVANCE, LOW);
+  delay(1200);
+  digitalWrite(K103_TAKEUP, LOW);
+  Serial.println("but also not really implemented?");
+}
+
+void reverse(Reel * r, uint8_t n) {
+  digitalWrite(K103_REVERSE, LOW);
+  // TODO: only wait if we're actually flipping it
+  delay(30);
+  analogWrite(K103_TAKEUP, 80);
+  digitalWrite(K103_ADVANCE, HIGH);
+  delay(30);
+  digitalWrite(K103_ADVANCE, LOW);
+  delay(1200);
+  digitalWrite(K103_TAKEUP, LOW);
+  Serial.println("but also not really implemented?");
+}
+
+void handle_reel_command() {
+  Serial.println("not yet implemented");
+}
+
+void handle_frame_command() {
+  // TODO: timeout or other escape
+  while (!Serial.available());
+  byte c = Serial.read();
+  switch (c) {
+    case '*': return Serial.println("not yet implemented");
+    case 'F':
+      while (!Serial.available());
+      forward(&k103, Serial.read());
+      return Serial.println("probably advanced");
+    case 'R':
+      while (!Serial.available());
+      reverse(&k103, Serial.read());
+      return Serial.println("probably advanced");
+    case '?': return Serial.println("not yet implemented");
+    default:
+      Serial.print("bad frame command byte: ");
+      Serial.println(c, HEX);
+  }
+}
+
 void handle_serial() {
   if (Serial.available() > 0) {
-    
+    byte c = Serial.read();
+    switch (c) {
+      case ASCII_DC1: return handle_reel_command();
+      case ASCII_DC2: return handle_frame_command();
+      default:
+        Serial.print("bad command byte: ");
+        Serial.println(c, HEX);
+    }
   }
 }
 
