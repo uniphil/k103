@@ -28,7 +28,7 @@ if __name__ == '__main__':
 
     s.write(bytearray([
         0x12,
-        'R',
+        'F',
         1,
     ]))
 

@@ -122,6 +122,8 @@ void setup() {
   Serial.println(bolex.desc);
   Serial.println(bolex.len);
   Serial.println(bolex.frame);
+
+  TCCR1B = TCCR1B & B11111000 | B00000010; // timer1 PWM frequency 3921.16 Hz
 }
 
 void fwd_isr() {
@@ -133,7 +135,7 @@ void forward(Reel * r, uint8_t n) {
   digitalWrite(K103_REVERSE, HIGH);
   // TODO: only wait if we're actually flipping it
   delay(30);
-  analogWrite(K103_TAKEUP, 80);
+  analogWrite(K103_TAKEUP, 127);
   digitalWrite(K103_ADVANCE, HIGH);
   delay(30);
   digitalWrite(K103_ADVANCE, LOW);
@@ -146,7 +148,7 @@ void reverse(Reel * r, uint8_t n) {
   digitalWrite(K103_REVERSE, LOW);
   // TODO: only wait if we're actually flipping it
   delay(30);
-  analogWrite(K103_TAKEUP, 80);
+  analogWrite(K103_TAKEUP, 127);
   digitalWrite(K103_ADVANCE, HIGH);
   delay(30);
   digitalWrite(K103_ADVANCE, LOW);
