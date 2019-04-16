@@ -3,6 +3,51 @@ from serial import Serial
 from serial.tools import list_ports
 from time import sleep
 
+REEL_CMD = 0x11  # DC1
+FRAME_CMD = 0x12  # DC2
+
+
+def check_bolex_reel():
+    cam_cmd = bytearray([
+        REEL_CMD,
+        '?',
+        'C',
+    ])
+    return expect_cmd(cam_cmd, {
+
+    })
+
+def check_k103_reel():
+    k103_cmd = bytearray([
+        REEL_CMD,
+        '?',
+        'C',
+    ])
+
+
+def check_load_bolex():
+    pass
+
+
+def check_load_k103():
+    pass
+
+
+def check_capture():
+    pass
+
+
+def check_advance():
+    pass
+
+
+def check_reverse():
+    pass
+
+
+def check_get_frame():
+    pass
+
 
 if __name__ == '__main__':
     import sys

@@ -123,7 +123,7 @@ void setup() {
   Serial.println(bolex.len);
   Serial.println(bolex.frame);
 
-  TCCR1B = TCCR1B & B11111000 | B00000010; // timer1 PWM frequency 3921.16 Hz
+//  TCCR1B = TCCR1B & B11111000 | B00000010; // timer1 PWM frequency 3921.16 Hz
 }
 
 void fwd_isr() {
