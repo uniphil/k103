@@ -7,10 +7,7 @@ THIS_SOFTWARE_EPOCH = mktime((  # validity check: no reel could be loaded before
 
 
 class Reel(object):
-    loaded_at = None
-    description = None
-    total_frames = None
-    current_frame = None
+    BYTES_FMT = 'I 8s i i'
 
     def __init__(self, loaded_at, description, total_frames, current_frame):
         assert loaded_at > THIS_SOFTWARE_EPOCH,\
@@ -37,20 +34,15 @@ class Reel(object):
             self.total_frames)
 
     def to_bytes(self):
-        ascii_desc = '{: <8}'.format(self.description).encode('ascii')[:8]
-        return bytearray(
-            pack('I', self.loaded_at) +
-            ascii_desc +
-            pack('i', self.total_frames) +
-            pack('i', self.current_frame))
+        ascii_desc = self.description.encode('ascii')
+        return pack(self.BYTES_FMT,
+            self.loaded_at, ascii_desc, self.total_frames, self.current_frame)
 
     @staticmethod
     def from_bytes(b):
         assert len(b) == 20, 'reel data must be 20 bytes long'
-        loaded_at = unpack('I', b[0:4])[0]  # arduino ulong => uint (4 bytes)
-        description = b[4:12].decode('ascii')  # 4 ascii bytes for description
-        total_frames = unpack('i', b[12:16])[0]  # arduino long => int (4 bytes)
-        current_frame = unpack('i', b[16:20])[0]  # arduino long => int (4 bytes)
+        loaded_at, description, total_frames, current_frame =\
+            unpack(Reel.BYTES_FMT, b)
         return Reel(loaded_at, description, total_frames, current_frame)
 
 
