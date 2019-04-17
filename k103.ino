@@ -158,7 +158,21 @@ void reverse(Reel * r, uint8_t n) {
 }
 
 void handle_reel_command() {
-  Serial.println("not yet implemented");
+  // TODO: timeout or other escape
+  while (!Serial.available());
+  byte c = Serial.read();
+  switch (c) {
+    case '?':
+      while (!Serial.available());
+      char device = Serial.read();
+      if (device == 'C') {
+        Serial.write((const char*)(&bolex), sizeof(Reel));
+      } else {
+        Serial.println("Not yet implemented");
+      }
+      return;
+    default: return Serial.println("not yet implemented");
+  }
 }
 
 void handle_frame_command() {

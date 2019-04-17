@@ -3,25 +3,30 @@ from serial import Serial
 from serial.tools import list_ports
 from time import sleep
 
+from k103 import Reel
+
 REEL_CMD = 0x11  # DC1
 FRAME_CMD = 0x12  # DC2
 
 
-def check_bolex_reel():
-    cam_cmd = bytearray([
+def check_bolex_reel(s):
+    s.write(bytearray([
         REEL_CMD,
         '?',
-        'C',
-    ])
-    return expect_cmd(cam_cmd, {
-
-    })
+        'C',  # camera
+    ]))
+    sleep(1)
+    # out = s.read(s.in_waiting)
+    out = s.read(20)
+    reel = Reel.from_bytes(out)
+    print('reel', reel)
+    # print('got', out)
 
 def check_k103_reel():
-    k103_cmd = bytearray([
+    cmd = bytearray([
         REEL_CMD,
         '?',
-        'C',
+        'P',  # projector
     ])
 
 
@@ -67,19 +72,20 @@ if __name__ == '__main__':
     s = Serial(port, 9600)
 
     sleep(2)
-
     t = s.read(s.in_waiting)
     print(t)
 
-    s.write(bytearray([
-        0x12,
-        'F',
-        1,
-    ]))
+    check_bolex_reel(s)
 
-    sleep(2)
-    t = s.read(s.in_waiting)
-    print(t)
+    # s.write(bytearray([
+    #     0x12,
+    #     'F',
+    #     1,
+    # ]))
+
+    # sleep(2)
+    # t = s.read(s.in_waiting)
+    # print(t)
 
 
     s.close()
