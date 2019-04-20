@@ -1,13 +1,26 @@
 #!/usr/bin/env python
 from serial import Serial
 from serial.tools import list_ports
-from time import sleep
+from time import sleep, time
 
 from k103 import Reel
 
 REEL_CMD = 0x11  # DC1
 FRAME_CMD = 0x12  # DC2
 
+
+
+def check_load_bolex(s):
+    r = Reel(time(), 'asdf', 72, 0)
+    s.write(bytearray([
+        REEL_CMD,
+        '!',
+        'C',
+    ]))
+    s.write(r.to_bytes())
+    sleep(0.3)
+    t = s.read(s.in_waiting)
+    print(t)
 
 def check_bolex_reel(s):
     s.write(bytearray([
@@ -19,7 +32,7 @@ def check_bolex_reel(s):
     # out = s.read(s.in_waiting)
     out = s.read(20)
     reel = Reel.from_bytes(out)
-    print('reel', reel)
+    print 'reel', reel
     # print('got', out)
 
 def check_k103_reel():
@@ -28,10 +41,6 @@ def check_k103_reel():
         '?',
         'P',  # projector
     ])
-
-
-def check_load_bolex():
-    pass
 
 
 def check_load_k103():
@@ -75,6 +84,10 @@ if __name__ == '__main__':
     t = s.read(s.in_waiting)
     print(t)
 
+    print('check load bolex')
+    check_load_bolex(s)
+    sleep(0.3)
+    print('check bolex reel')
     check_bolex_reel(s)
 
     # s.write(bytearray([

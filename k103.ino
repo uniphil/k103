@@ -157,6 +157,27 @@ void reverse(Reel * r, uint8_t n) {
   Serial.println("but also not really implemented?");
 }
 
+void handle_load_reel(Reel * r) {
+  // *    DC1 '!' 'C|P'N ts(4) desc(8) len(4)
+  byte data[20];
+  for (int i = 0; i < 20; i++) {
+    data[i] = Serial.read();
+  }
+  unsigned long ts = (unsigned long)(*data);
+  Serial.print("ts ");
+  Serial.println(ts);
+  char desc[8];
+  strncpy(desc, (*data) + 4, 8);
+  Serial.print("desc ");
+  Serial.write(desc, 8);
+  Serial.println();
+  long len = (long)((*data) + 12);
+  Serial.print("len ");
+  Serial.println(len);
+  load_film(r, ts, desc, len);
+  Serial.println("loaded maybe.");
+}
+
 void handle_reel_command() {
   // TODO: timeout or other escape
   while (!Serial.available());
@@ -167,6 +188,15 @@ void handle_reel_command() {
       char device = Serial.read();
       if (device == 'C') {
         Serial.write((const char*)(&bolex), sizeof(Reel));
+      } else {
+        Serial.println("Not yet implemented");
+      }
+      return;
+    case '!':
+      while(!Serial.available());
+      device = Serial.read();
+      if (device == 'C') {
+        handle_load_reel(&bolex);
       } else {
         Serial.println("Not yet implemented");
       }
