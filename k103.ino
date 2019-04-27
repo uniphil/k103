@@ -133,6 +133,15 @@ void fwd_isr() {
 void rev_isr() {
 }
 
+void capture(Reel * r, uint8_t n) {
+  for (uint8_t i = 0; i < n; i++) {
+    digitalWrite(BOLEX_SHUTTER, LOW);
+    delay(60);
+    digitalWrite(BOLEX_SHUTTER, HIGH);
+    delay(1200);
+  }
+}
+
 void forward(Reel * r, uint8_t n) {
   digitalWrite(K103_REVERSE, HIGH);
   // TODO: only wait if we're actually flipping it
@@ -182,7 +191,7 @@ void handle_load_reel(Reel * r) {
   Serial.println("loaded maybe.");
 }
 
-void handle_cam_command() {
+void handle_reel_command() {
   // TODO: timeout or other escape
   while (!Serial.available());
   byte c = Serial.read();
@@ -209,20 +218,20 @@ void handle_cam_command() {
   }
 }
 
-void handle_proj_command() {
+void handle_frame_command() {
   // TODO: timeout or other escape
   while (!Serial.available());
   byte c = Serial.read();
   switch (c) {
-    case '*': return Serial.println("not yet implemented");
+    case '*':
+      while (!Serial.available());
+      return capture(&bolex, Serial.read());
     case 'F':
       while (!Serial.available());
-      forward(&k103, Serial.read());
-      return Serial.println("probably advanced");
+      return forward(&k103, Serial.read());
     case 'R':
       while (!Serial.available());
-      reverse(&k103, Serial.read());
-      return Serial.println("probably advanced");
+      return reverse(&k103, Serial.read());
     case '?': return Serial.println("not yet implemented");
     default:
       Serial.print("bad frame command byte: ");
@@ -234,8 +243,8 @@ void handle_serial() {
   if (Serial.available() > 0) {
     byte c = Serial.read();
     switch (c) {
-      case ASCII_DC1: return handle_cam_command();
-      case ASCII_DC2: return handle_proj_command();
+      case ASCII_DC1: return handle_reel_command();
+      case ASCII_DC2: return handle_frame_command();
       default:
         Serial.print("bad command byte: ");
         Serial.println(c, HEX);
