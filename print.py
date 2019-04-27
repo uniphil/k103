@@ -8,7 +8,7 @@ def capture(s, n):
     for frame in range(n):
         print(frame + 1)
         s.write(bytearray([FRAME_CMD, '*', 1]))
-        sleep(1.3)
+        sleep(0.9)
         s.write(bytearray([FRAME_CMD, 'F', 1]))
         sleep(1.3)
 

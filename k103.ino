@@ -9,6 +9,7 @@
 #define K103_REV_SW   3  // pulls down
 
 #define K103_FRAME_TIME 1200  // ms
+#define BOLEX_FRAME_TIME 800  // ms
 
 /**
  * K-103 control system
@@ -138,7 +139,7 @@ void capture(Reel * r, uint8_t n) {
     digitalWrite(BOLEX_SHUTTER, LOW);
     delay(60);
     digitalWrite(BOLEX_SHUTTER, HIGH);
-    delay(1200);
+    delay(BOLEX_FRAME_TIME);
   }
 }
 
