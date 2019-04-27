@@ -3,11 +3,7 @@ from serial import Serial
 from serial.tools import list_ports
 from time import sleep, time
 
-from k103 import Reel
-
-REEL_CMD = 0x11  # DC1
-FRAME_CMD = 0x12  # DC2
-
+from k103 import Reel, REEL_CMD, FRAME_CMD
 
 
 def check_load_bolex(s):
@@ -51,10 +47,10 @@ def check_capture(s):
     cmd = bytearray([
         FRAME_CMD,
         '*',
-        1,
+        2,
     ])
     s.write(cmd)
-    sleep(1)
+    sleep(3)
     t = s.read(s.in_waiting)
     print(t)
 

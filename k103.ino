@@ -120,10 +120,10 @@ void setup() {
 
   Serial.begin(9600);
   Serial.println("hello");
-  Serial.println(bolex.ts);
-  Serial.println(bolex.desc);
-  Serial.println(bolex.len);
-  Serial.println(bolex.frame);
+//  Serial.println(bolex.ts);
+//  Serial.println(bolex.desc);
+//  Serial.println(bolex.len);
+//  Serial.println(bolex.frame);
 
 //  TCCR1B = TCCR1B & B11111000 | B00000010; // timer1 PWM frequency 3921.16 Hz
 }

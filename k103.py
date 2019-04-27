@@ -2,6 +2,10 @@
 from struct import pack, unpack
 from time import time, ctime, mktime
 
+REEL_CMD = 0x11  # DC1
+FRAME_CMD = 0x12  # DC2
+
+
 THIS_SOFTWARE_EPOCH = mktime((  # validity check: no reel could be loaded before
     2019, 04, 16, 0, 0, 0, 0, 0, -1))
 
