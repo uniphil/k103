@@ -8,6 +8,8 @@
 #define K103_FWD_SW   2  // pulls down
 #define K103_REV_SW   3  // pulls down
 
+#define K103_FRAME_TIME 1200  // ms
+
 /**
  * K-103 control system
  * rewired for AC isolation and a bit of automation by phil for madi, 2019
@@ -136,12 +138,13 @@ void forward(Reel * r, uint8_t n) {
   // TODO: only wait if we're actually flipping it
   delay(30);
   analogWrite(K103_TAKEUP, 127);
-  digitalWrite(K103_ADVANCE, HIGH);
-  delay(30);
-  digitalWrite(K103_ADVANCE, LOW);
-  delay(1200);
+  for (uint8_t i = 0; i < n; i++) {
+    digitalWrite(K103_ADVANCE, HIGH);
+    delay(30);
+    digitalWrite(K103_ADVANCE, LOW);
+    delay(K103_FRAME_TIME);
+  }
   digitalWrite(K103_TAKEUP, LOW);
-  Serial.println("but also not really implemented?");
 }
 
 void reverse(Reel * r, uint8_t n) {
@@ -149,12 +152,13 @@ void reverse(Reel * r, uint8_t n) {
   // TODO: only wait if we're actually flipping it
   delay(30);
   analogWrite(K103_TAKEUP, 127);
-  digitalWrite(K103_ADVANCE, HIGH);
-  delay(30);
-  digitalWrite(K103_ADVANCE, LOW);
-  delay(1200);
+  for (uint8_t i = 0; i < n; i++) {
+    digitalWrite(K103_ADVANCE, HIGH);
+    delay(30);
+    digitalWrite(K103_ADVANCE, LOW);
+    delay(K103_FRAME_TIME);
+  }
   digitalWrite(K103_TAKEUP, LOW);
-  Serial.println("but also not really implemented?");
 }
 
 void handle_load_reel(Reel * r) {
@@ -178,7 +182,7 @@ void handle_load_reel(Reel * r) {
   Serial.println("loaded maybe.");
 }
 
-void handle_reel_command() {
+void handle_cam_command() {
   // TODO: timeout or other escape
   while (!Serial.available());
   byte c = Serial.read();
@@ -205,7 +209,7 @@ void handle_reel_command() {
   }
 }
 
-void handle_frame_command() {
+void handle_proj_command() {
   // TODO: timeout or other escape
   while (!Serial.available());
   byte c = Serial.read();
@@ -230,8 +234,8 @@ void handle_serial() {
   if (Serial.available() > 0) {
     byte c = Serial.read();
     switch (c) {
-      case ASCII_DC1: return handle_reel_command();
-      case ASCII_DC2: return handle_frame_command();
+      case ASCII_DC1: return handle_cam_command();
+      case ASCII_DC2: return handle_proj_command();
       default:
         Serial.print("bad command byte: ");
         Serial.println(c, HEX);

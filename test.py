@@ -5,15 +5,15 @@ from time import sleep, time
 
 from k103 import Reel
 
-REEL_CMD = 0x11  # DC1
-FRAME_CMD = 0x12  # DC2
+CAM_CMD = 0x11  # DC1
+PROJ_CMD = 0x12  # DC2
 
 
 
 def check_load_bolex(s):
     r = Reel(time(), 'asdf', 72, 0)
     s.write(bytearray([
-        REEL_CMD,
+        CAM_CMD,
         '!',
         'C',
     ]))
@@ -24,7 +24,7 @@ def check_load_bolex(s):
 
 def check_bolex_reel(s):
     s.write(bytearray([
-        REEL_CMD,
+        CAM_CMD,
         '?',
         'C',  # camera
     ]))
@@ -35,31 +35,48 @@ def check_bolex_reel(s):
     print 'reel', reel
     # print('got', out)
 
-def check_k103_reel():
+def check_k103_reel(s):
     cmd = bytearray([
-        REEL_CMD,
+        CAM_CMD,
         '?',
         'P',  # projector
     ])
 
 
-def check_load_k103():
+def check_load_k103(s):
     pass
 
 
-def check_capture():
+def check_capture(s):
     pass
 
 
-def check_advance():
-    pass
+def check_advance(s):
+    cmd = bytearray([
+        PROJ_CMD,
+        'F',
+        2,
+    ])
+    s.write(cmd)
+    sleep(3)
+    t = s.read(s.in_waiting)
+    print(t)
 
 
-def check_reverse():
-    pass
+
+def check_reverse(s):
+    cmd = bytearray([
+        PROJ_CMD,
+        'R',
+        2,
+    ])
+    s.write(cmd)
+    sleep(3)
+    t = s.read(s.in_waiting)
+    print(t)
 
 
-def check_get_frame():
+def check_get_frame(s):
     pass
 
 
@@ -84,11 +101,17 @@ if __name__ == '__main__':
     t = s.read(s.in_waiting)
     print(t)
 
-    print('check load bolex')
-    check_load_bolex(s)
-    sleep(0.3)
-    print('check bolex reel')
-    check_bolex_reel(s)
+    # print('check load bolex')
+    # check_load_bolex(s)
+    # sleep(0.3)
+    # print('check bolex reel')
+    # check_bolex_reel(s)
+
+    print('check advance')
+    check_advance(s)
+
+    print('check reverse')
+    check_reverse(s)
 
     # s.write(bytearray([
     #     0x12,
