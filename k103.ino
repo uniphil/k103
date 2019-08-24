@@ -10,6 +10,7 @@
 
 #define K103_FRAME_TIME 1200  // ms
 #define BOLEX_FRAME_TIME 800  // ms
+#define FRAME_UPDATE_THROTTLE 60000  // ms, save eeprom wear for higher data loss risk
 
 /**
  * K-103 control system
@@ -76,6 +77,38 @@ struct Reel {
 
 Reel bolex;
 Reel k103;
+boolean bolex_frame_dirty = false;
+boolean k103_frame_dirty = false;
+unsigned long bolex_last_frame_save = 0 - FRAME_UPDATE_THROTTLE;
+unsigned long k103_last_frame_save = 0 - FRAME_UPDATE_THROTTLE;
+
+void update_frame(Reel * r, int n) {
+  r->frame += n;
+  if (r == &bolex) {
+    bolex_frame_dirty = true;
+  } else if (r == &k103) {
+    k103_frame_dirty = true;
+  } else {
+    Serial.println("invlalid reel specified for frame update");
+  }
+}
+
+bool _persist_reel_frame(unsigned long now, Reel * r, boolean * dirty,
+                         unsigned long * last_frame_save, uint16_t eep_offset,
+                         boolean ignore_throttle) {
+  boolean throttle_cleared = (now - *last_frame_save) > FRAME_UPDATE_THROTTLE;
+  if (*dirty && (throttle_cleared || ignore_throttle)) {
+    EEPROM.put(eep_offset + 28, r->frame);
+    *dirty = false;
+    *last_frame_save = now;
+  }
+  return *dirty;
+}
+bool persist_frames(boolean ignore_throttle=false) {
+  unsigned long now = millis();
+  _persist_reel_frame(now, &bolex, &bolex_frame_dirty, &bolex_last_frame_save, EEP_BOLEX_OFFSET, ignore_throttle);
+  _persist_reel_frame(now, &k103, &k103_frame_dirty, &k103_last_frame_save, EEP_K103_OFFSET, ignore_throttle);
+}
 
 void restore_reel_state(Reel * r, uint16_t eep_offset) {
   EEPROM.get(eep_offset, *r);
@@ -123,8 +156,10 @@ void capture(Reel * r, uint8_t n) {
     digitalWrite(BOLEX_SHUTTER, LOW);
     delay(60);
     digitalWrite(BOLEX_SHUTTER, HIGH);
+    update_frame(r, 1);
     delay(BOLEX_FRAME_TIME);
   }
+  persist_frames(true);
 }
 
 void forward(Reel * r, uint8_t n) {
@@ -137,9 +172,13 @@ void forward(Reel * r, uint8_t n) {
     digitalWrite(K103_ADVANCE, HIGH);
     delay(30);
     digitalWrite(K103_ADVANCE, LOW);
+    update_frame(r, 1);
     delay(K103_FRAME_TIME);
   }
+  persist_frames(true);
   digitalWrite(K103_TAKEUP, LOW);
+  Serial.print("advanced frames: ");
+  Serial.println(n);
 }
 
 void reverse(Reel * r, uint8_t n) {
@@ -152,8 +191,10 @@ void reverse(Reel * r, uint8_t n) {
     digitalWrite(K103_ADVANCE, HIGH);
     delay(30);
     digitalWrite(K103_ADVANCE, LOW);
+    update_frame(r, -1);
     delay(K103_FRAME_TIME);
   }
+  persist_frames(true);
   digitalWrite(K103_TAKEUP, LOW);
 }
 
@@ -189,6 +230,8 @@ void handle_reel_command() {
       getSerial(device);
       if (device == 'C') {
         putSerial(bolex);
+      } else if (device == 'P') {
+        putSerial(k103);
       } else {
         Serial.println("Not yet implemented");
       }
@@ -197,6 +240,8 @@ void handle_reel_command() {
       getSerial(device);
       if (device == 'C') {
         handle_load_reel(&bolex, EEP_BOLEX_OFFSET);
+      } else if (device == 'P') {
+        handle_load_reel(&k103, EEP_K103_OFFSET);
       } else {
         Serial.println("Not yet implemented");
       }
@@ -228,8 +273,8 @@ void handle_frame_command() {
 }
 
 void handle_serial() {
+  byte c;
   if (Serial.available() > 0) {
-    byte c;
     getSerial(c);
     switch (c) {
       case ASCII_DC1: return handle_reel_command();
@@ -243,5 +288,6 @@ void handle_serial() {
 
 void loop() {
   handle_serial();
+  persist_frames();
 }
 
