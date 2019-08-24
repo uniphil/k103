@@ -52,27 +52,24 @@
  * 
  * EEPROM shape
  * 
- * Reel: 20 bytes
+ * Reel: 32 bytes
  * off  size  desc            type
- *   0  4     load timestamp  unsigned long (NB: year 2106)
- * + 4  8     description     char[8]
- * +12  4     reel length     long
- * +16  4     current frame   long
+ *   0   4    load timestamp  unsigned long (NB: year 2106)
+ * + 4  20    description     char[8]
+ * +24   4    reel length     long
+ * +28   4    current frame   long
  * 
  */
 
 #define EEP_BOLEX_OFFSET   0
 #define EEP_K103_OFFSET   40
-// 20-byte extra gap: can add features if needed without having to realign
-// or even, add a second camera?
 
 #define ASCII_DC1 0x11
 #define ASCII_DC2 0x12
 
 struct Reel {
-  uint16_t offset;
   unsigned long ts;
-  char desc[8];
+  char desc[20];
   long len;
   long frame;
 };
@@ -81,24 +78,15 @@ Reel bolex;
 Reel k103;
 
 void restore_reel_state(Reel * r, uint16_t eep_offset) {
-  r->offset = eep_offset;
-  EEPROM.get(eep_offset + 0, r->ts);
-  EEPROM.get(eep_offset + 4, r->desc);
-  EEPROM.get(eep_offset + 12, r->len);
-  EEPROM.get(eep_offset + 16, r->frame);
+  EEPROM.get(eep_offset, *r);
 }
 
-void load_film(Reel * r, unsigned long ts, char desc[8], long len, long frame=0) {
+void load_film(Reel * r, uint16_t eep_offset, unsigned long ts, char desc[20], long len, long frame=0) {
   r->ts = ts;
-  strncpy(desc, r->desc, 8);
+  strncpy(r->desc, desc, 20);
   r->len = len;
   r->frame = frame;
-
-  uint16_t eep_offset = r->offset;
-  EEPROM.put(eep_offset + 0, r->ts);
-  EEPROM.put(eep_offset + 4, r->desc);
-  EEPROM.put(eep_offset + 12, r->len);
-  EEPROM.put(eep_offset + 16, r->frame);
+  EEPROM.put(eep_offset, *r);
 }
 
 void setup() {
@@ -116,15 +104,11 @@ void setup() {
   attachInterrupt(digitalPinToInterrupt(K103_FWD_SW), fwd_isr, FALLING);
   attachInterrupt(digitalPinToInterrupt(K103_REV_SW), rev_isr, FALLING);
 
-  restore_reel_state(&bolex, EEP_BOLEX_OFFSET);
-  restore_reel_state(&k103, EEP_K103_OFFSET);
-
   Serial.begin(9600);
   Serial.println("hello");
-//  Serial.println(bolex.ts);
-//  Serial.println(bolex.desc);
-//  Serial.println(bolex.len);
-//  Serial.println(bolex.frame);
+
+  restore_reel_state(&bolex, EEP_BOLEX_OFFSET);
+  restore_reel_state(&k103, EEP_K103_OFFSET);
 
 //  TCCR1B = TCCR1B & B11111000 | B00000010; // timer1 PWM frequency 3921.16 Hz
 }
@@ -144,9 +128,10 @@ void capture(Reel * r, uint8_t n) {
 }
 
 void forward(Reel * r, uint8_t n) {
-  digitalWrite(K103_REVERSE, HIGH);
-  // TODO: only wait if we're actually flipping it
-  delay(30);
+  if (digitalRead(K103_REVERSE) == LOW) {
+    digitalWrite(K103_REVERSE, HIGH);
+    delay(30);
+  }
   analogWrite(K103_TAKEUP, 127);
   for (uint8_t i = 0; i < n; i++) {
     digitalWrite(K103_ADVANCE, HIGH);
@@ -158,9 +143,10 @@ void forward(Reel * r, uint8_t n) {
 }
 
 void reverse(Reel * r, uint8_t n) {
-  digitalWrite(K103_REVERSE, LOW);
-  // TODO: only wait if we're actually flipping it
-  delay(30);
+  if (digitalRead(K103_REVERSE) == HIGH) {
+    digitalWrite(K103_REVERSE, LOW);
+    delay(30);
+  }
   analogWrite(K103_TAKEUP, 127);
   for (uint8_t i = 0; i < n; i++) {
     digitalWrite(K103_ADVANCE, HIGH);
@@ -171,46 +157,46 @@ void reverse(Reel * r, uint8_t n) {
   digitalWrite(K103_TAKEUP, LOW);
 }
 
-void handle_load_reel(Reel * r) {
-  // *    DC1 '!' 'C|P'N ts(4) desc(8) len(4)
-  byte data[20];
-  for (int i = 0; i < 20; i++) {
-    data[i] = Serial.read();
-  }
-  unsigned long ts = (unsigned long)(*data);
-  Serial.print("ts ");
-  Serial.println(ts);
-  char desc[8];
-  strncpy(desc, (*data) + 4, 8);
-  Serial.print("desc ");
-  Serial.write(desc, 8);
-  Serial.println();
-  long len = (long)((*data) + 12);
-  Serial.print("len ");
-  Serial.println(len);
-  load_film(r, ts, desc, len);
-  Serial.println("loaded maybe.");
+void handle_load_reel(Reel * r, uint16_t eep_offset) {
+  // *    DC1 '!' 'C|P'N ts(4) desc(20) len(4)
+  unsigned long ts;
+  char desc[20];
+  long len, frame;
+  getSerial(ts);
+  getSerial(desc);
+  getSerial(len);
+  getSerial(frame);
+  load_film(r, eep_offset, ts, desc, len, frame);
+}
+
+template< typename T > T &getSerial(T &t) {
+  Serial.readBytes((uint8_t*)&t, sizeof(T));
+  return t;
+}
+
+template < typename T > T &putSerial(T &t) {
+  Serial.write((uint8_t*)&t, sizeof(T));
+  return t;
 }
 
 void handle_reel_command() {
   // TODO: timeout or other escape
-  while (!Serial.available());
-  byte c = Serial.read();
+  byte c;
+  getSerial(c);
+  char device;
   switch (c) {
     case '?':
-      while (!Serial.available());
-      char device = Serial.read();
+      getSerial(device);
       if (device == 'C') {
-        Serial.write((const char*)(&bolex), sizeof(Reel));
+        putSerial(bolex);
       } else {
         Serial.println("Not yet implemented");
       }
       return;
     case '!':
-      while(!Serial.available());
-      device = Serial.read();
+      getSerial(device);
       if (device == 'C') {
-        handle_load_reel(&bolex);
+        handle_load_reel(&bolex, EEP_BOLEX_OFFSET);
       } else {
         Serial.println("Not yet implemented");
       }
@@ -221,18 +207,19 @@ void handle_reel_command() {
 
 void handle_frame_command() {
   // TODO: timeout or other escape
-  while (!Serial.available());
-  byte c = Serial.read();
+  byte c;
+  getSerial(c);
+  uint8_t n;
   switch (c) {
     case '*':
-      while (!Serial.available());
-      return capture(&bolex, Serial.read());
+      getSerial(n);
+      return capture(&bolex, n);
     case 'F':
-      while (!Serial.available());
-      return forward(&k103, Serial.read());
+      getSerial(n);
+      return forward(&k103, n);
     case 'R':
-      while (!Serial.available());
-      return reverse(&k103, Serial.read());
+      getSerial(n);
+      return reverse(&k103, n);
     case '?': return Serial.println("not yet implemented");
     default:
       Serial.print("bad frame command byte: ");
@@ -242,12 +229,13 @@ void handle_frame_command() {
 
 void handle_serial() {
   if (Serial.available() > 0) {
-    byte c = Serial.read();
+    byte c;
+    getSerial(c);
     switch (c) {
       case ASCII_DC1: return handle_reel_command();
       case ASCII_DC2: return handle_frame_command();
       default:
-        Serial.print("bad command byte: ");
+        Serial.print("bad command byte: 0x");
         Serial.println(c, HEX);
     }
   }

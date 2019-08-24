@@ -50,9 +50,6 @@ class Reel(object):
         return Reel(loaded_at, description, total_frames, current_frame)
 
 
-
-
-
 if __name__ == '__main__':
     r_ok = lambda: bytearray([
         145, # ts  apr 16 7pm
