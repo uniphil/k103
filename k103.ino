@@ -1,5 +1,5 @@
 #include <EEPROM.h>
-#include "framer.h"
+#include "packetizer.h"
 
 #define BOLEX_SWITCH  12 // pulls down
 #define BOLEX_SHUTTER 8  // active low
@@ -12,7 +12,6 @@
 #define K103_FRAME_TIME 1200  // ms
 #define BOLEX_FRAME_TIME 800  // ms
 #define FRAME_UPDATE_THROTTLE 60000  // ms, save eeprom wear for higher data loss risk
-
 
 
 /**
@@ -71,7 +70,6 @@
 #define ASCII_DC1 0x11
 #define ASCII_DC2 0x12
 
-#define RX_ECHO       0x40
 
 // reels
 #define CMD_LOAD_BOLEX 0x00
@@ -86,34 +84,38 @@
 #define CMD_REV_K103   0x19
 
 
-template< typename T > T &getFromFrame(Framer &f, uint8_t len, T &t) {
-  assert(
-  Serial.readBytes((uint8_t*)&t, sizeof(T));
-  return t;
-}
+//template< typename T > T &getFromFrame(Framer &f, uint8_t len, T &t) {
+////  assert(
+//  Serial.readBytes((uint8_t*)&t, sizeof(T));
+//  return t;
+//}
+//
+//template < typename T > T &putToFrame(Framer &f, T &t) {
+//  Serial.write((uint8_t*)&t, sizeof(T));
+//  return t;
+//}
 
-template < typename T > T &putToFrame(Framer &f, T &t) {
-  Serial.write((uint8_t*)&t, sizeof(T));
-  return t;
-}
+
+//void Framer::handle_command(byte command, byte * data, uint8_t data_length) {
+//  switch (command) {
+//  case RX_ECHO:
+//    write(TX_LOG_FRAMER, "echo:", 5);
+//    write(TX_LOG_FRAMER, data, data_length);
+//    break;
+//  case CMD_LOAD_BOLEX:
+//    print("suuuuuup");
+//    break;
+//  default:
+//    print(TX_LOG_FRAMER, "unrecognized command:");
+//    print(String(command, HEX));
+//  }
+//}
+//
+//Framer f = Framer(&Serial);
 
 
-void Framer::handle_command(byte command, byte * data, uint8_t data_length) {
-  switch (command) {
-  case RX_ECHO:
-    write(TX_LOG_FRAMER, "echo:", 5);
-    write(TX_LOG_FRAMER, data, data_length);
-    break;
-  case CMD_LOAD_BOLEX:
-    print("suuuuuup");
-    break;
-  default:
-    print(TX_LOG_FRAMER, "unrecognized command:");
-    print(String(command, HEX));
-  }
-}
+Packetizer packetizer = Packetizer(&Serial);
 
-Framer f = Framer(&Serial);
 
 struct Reel {
   unsigned long ts;
@@ -185,7 +187,7 @@ void setup() {
   attachInterrupt(digitalPinToInterrupt(K103_REV_SW), rev_isr, FALLING);
 
   Serial.begin(9600);
-  Serial.println("hello");
+//  Serial.println("hello");
 
   restore_reel_state(&bolex, EEP_BOLEX_OFFSET);
   restore_reel_state(&k103, EEP_K103_OFFSET);
@@ -250,81 +252,117 @@ void handle_load_reel(Reel * r, uint16_t eep_offset) {
   unsigned long ts;
   char desc[20];
   long len, frame;
-  getSerial(ts);
-  getSerial(desc);
-  getSerial(len);
-  getSerial(frame);
+//  getSerial(ts);
+//  getSerial(desc);
+//  getSerial(len);
+//  getSerial(frame);
   load_film(r, eep_offset, ts, desc, len, frame);
 }
 
 void handle_reel_command() {
-  // TODO: timeout or other escape
-  byte c;
-  getSerial(c);
-  char device;
-  switch (c) {
-    case '?':
-      getSerial(device);
-      if (device == 'C') {
-        putSerial(bolex);
-      } else if (device == 'P') {
-        putSerial(k103);
-      } else {
-        Serial.println("Not yet implemented");
-      }
-      return;
-    case '!':
-      getSerial(device);
-      if (device == 'C') {
-        handle_load_reel(&bolex, EEP_BOLEX_OFFSET);
-      } else if (device == 'P') {
-        handle_load_reel(&k103, EEP_K103_OFFSET);
-      } else {
-        Serial.println("Not yet implemented");
-      }
-      return;
-    default: return Serial.println("not yet implemented");
-  }
-}
-
-void handle_frame_command() {
-  // TODO: timeout or other escape
-  byte c;
-  getSerial(c);
-  uint8_t n;
-  switch (c) {
-    case '*':
-      getSerial(n);
-      return capture(&bolex, n);
-    case 'F':
-      getSerial(n);
-      return forward(&k103, n);
-    case 'R':
-      getSerial(n);
-      return reverse(&k103, n);
-    case '?': return Serial.println("not yet implemented");
-    default:
-      Serial.print("bad frame command byte: ");
-      Serial.println(c, HEX);
-  }
+//  // TODO: timeout or other escape
+//  byte c;
+//  getSerial(c);
+//  char device;
+//  switch (c) {
+//    case '?':
+//      getSerial(device);
+//      if (device == 'C') {
+//        putSerial(bolex);
+//      } else if (device == 'P') {
+//        putSerial(k103);
+//      } else {
+//        Serial.println("Not yet implemented");
+//      }
+//      return;
+//    case '!':
+//      getSerial(device);
+//      if (device == 'C') {
+//        handle_load_reel(&bolex, EEP_BOLEX_OFFSET);
+//      } else if (device == 'P') {
+//        handle_load_reel(&k103, EEP_K103_OFFSET);
+//      } else {
+//        Serial.println("Not yet implemented");
+//      }
+//      return;
+//    default: return Serial.println("not yet implemented");
+//  }
 }
 
 void handle_serial() {
-  byte c;
-  if (Serial.available() > 0) {
-    getSerial(c);
-    switch (c) {
-      case ASCII_DC1: return handle_reel_command();
-      case ASCII_DC2: return handle_frame_command();
-      default:
-        Serial.print("bad command byte: 0x");
-        Serial.println(c, HEX);
+//  byte c;
+//  if (Serial.available() > 0) {
+////    getSerial(c);
+//    switch (c) {
+//      case ASCII_DC1: return handle_reel_command();
+//      case ASCII_DC2: return handle_frame_command();
+//      default:
+//        Serial.print("bad command byte: 0x");
+//        Serial.println(c, HEX);
+//    }
+//  }
+}
+
+void get_packet() {
+  byte rec[62];
+  uint8_t len;
+  packetizer.receive(rec, &len);
+  switch (rec[0]) {
+  case ASCII_DC1:  // reel command
+    switch(rec[1]) {
+    case '?':
+      if (rec[2] == 'C') {
+        packetizer.put(bolex);
+      } else if (rec[2] == 'P') {
+        packetizer.put(k103);
+      } else {
+        packetizer.debug("expected 'C' or 'P' for '?'");
+        packetizer.debug(rec[2], 1);
+      }
+      return;
+    case '!':
+      if (rec[2] == 'C') {
+        handle_load_reel(&bolex, EEP_BOLEX_OFFSET);
+      } else if (rec[2] == 'P') {
+        handle_load_reel(&k103, EEP_K103_OFFSET);
+      } else {
+        packetizer.debug("expected 'C' or 'P' for '!'");
+        packetizer.debug(rec[2], 1);
+      }
+      return;
+    default:
+      packetizer.debug("bad reel command byte");
+      packetizer.debug(String(rec[0], DEC));
     }
+    break;
+  case ASCII_DC2:  // frame command
+    switch(rec[1]) {
+    case '*':
+      return capture(&bolex, rec[2]);
+    case 'F':
+      return forward(&k103, rec[2]);
+    case 'R':
+      return reverse(&k103, rec[2]);
+    case '?':
+      return packetizer.debug("'?' not yet implemented");
+    default:
+      packetizer.debug("bad frame command byte");
+      packetizer.debug(String(rec[0], DEC));
+    }
+    break;
+  default:
+    packetizer.debug("bad command byte");
+    packetizer.debug(String(rec[0], DEC));
   }
 }
 
+
+
 void loop() {
-  f.poll();
+  if (packetizer.might_have_something()) {
+    get_packet();
+  }
+//  f.poll();
 //  handle_serial();
 //  persist_frames();
 }
