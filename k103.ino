@@ -1,4 +1,5 @@
 #include <EEPROM.h>
+#include "framer.h"
 
 #define BOLEX_SWITCH  12 // pulls down
 #define BOLEX_SHUTTER 8  // active low
@@ -11,6 +12,8 @@
 #define K103_FRAME_TIME 1200  // ms
 #define BOLEX_FRAME_TIME 800  // ms
 #define FRAME_UPDATE_THROTTLE 60000  // ms, save eeprom wear for higher data loss risk
+
+
 
 /**
  * K-103 control system
@@ -67,6 +70,50 @@
 
 #define ASCII_DC1 0x11
 #define ASCII_DC2 0x12
+
+#define RX_ECHO       0x40
+
+// reels
+#define CMD_LOAD_BOLEX 0x00
+#define CMD_LOAD_K103  0x01
+#define CMD_GET_BOLEX  0x08
+#define CMD_GET_K103   0x09
+
+// frames
+#define CMD_FWD_BOLEX  0x10
+#define CMD_FWD_K103   0x11
+#define CMD_REV_BOLEX  0x18
+#define CMD_REV_K103   0x19
+
+
+template< typename T > T &getFromFrame(Framer &f, uint8_t len, T &t) {
+  assert(
+  Serial.readBytes((uint8_t*)&t, sizeof(T));
+  return t;
+}
+
+template < typename T > T &putToFrame(Framer &f, T &t) {
+  Serial.write((uint8_t*)&t, sizeof(T));
+  return t;
+}
+
+
+void Framer::handle_command(byte command, byte * data, uint8_t data_length) {
+  switch (command) {
+  case RX_ECHO:
+    write(TX_LOG_FRAMER, "echo:", 5);
+    write(TX_LOG_FRAMER, data, data_length);
+    break;
+  case CMD_LOAD_BOLEX:
+    print("suuuuuup");
+    break;
+  default:
+    print(TX_LOG_FRAMER, "unrecognized command:");
+    print(String(command, HEX));
+  }
+}
+
+Framer f = Framer(&Serial);
 
 struct Reel {
   unsigned long ts;
@@ -210,16 +257,6 @@ void handle_load_reel(Reel * r, uint16_t eep_offset) {
   load_film(r, eep_offset, ts, desc, len, frame);
 }
 
-template< typename T > T &getSerial(T &t) {
-  Serial.readBytes((uint8_t*)&t, sizeof(T));
-  return t;
-}
-
-template < typename T > T &putSerial(T &t) {
-  Serial.write((uint8_t*)&t, sizeof(T));
-  return t;
-}
-
 void handle_reel_command() {
   // TODO: timeout or other escape
   byte c;
@@ -287,7 +324,8 @@ void handle_serial() {
 }
 
 void loop() {
-  handle_serial();
-  persist_frames();
+  f.poll();
+//  handle_serial();
+//  persist_frames();
 }
 
