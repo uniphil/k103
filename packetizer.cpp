@@ -9,39 +9,56 @@ boolean Packetizer::might_have_something() {
   return stream->available() > 0;
 }
 
+uint8_t get_sequence_length(byte * stuff, uint8_t bytes_left) {
+  uint8_t i = 0;
+  while (i < bytes_left) {
+    uint8_t b = ((i + 1) == bytes_left) ? 0x00 : stuff[i];
+    if (b == 0x00) {
+      i += 1;
+      break;
+    }
+    i += 1;
+  }
+  return i;
+}
+
 int Packetizer::send(byte * message, size_t message_length, uint8_t mode=PACKET_NORMAL) {
   if (message_length == 0 || message_length > 62) {
     send("invalid packet length", PACKET_TX_ERR);
-    send(String(message_length, DEC), PACKET_TX_ERR);
+    send_mode(String(message_length, DEC), PACKET_TX_ERR);
     return -1;
   }
 
+  uint8_t len = message_length + 1;
   stream->write((byte)0x00);
-  stream->write(message_length + 1 | mode);
+  stream->write(len | mode);
 
-  uint8_t sequence_start = 0,
-          sequence_length;
-  while (sequence_start <= message_length) {
-    sequence_length = 0;
-    while (message[sequence_start + sequence_length] != 0x00 &&
-           sequence_start + sequence_length < message_length) {
-      sequence_length++;
+  uint8_t sequence_start = 0;
+  while (true) {
+    uint8_t bytes_left = len - sequence_start;
+    uint8_t sequence_length = get_sequence_length(message + sequence_start, bytes_left);
+    stream->write(sequence_length);
+    stream->write(message + sequence_start, sequence_length - 1);
+    sequence_start += sequence_length;
+    if (sequence_start >= len) {
+      break;
     }
-    stream->write(sequence_length + 1);
-    stream->write(message + sequence_start, sequence_length);
-    sequence_start += sequence_length + 1;
   }
 }
 
-int Packetizer::send(String message, uint8_t mode=PACKET_NORMAL) {
+int Packetizer::send(String message) {
+  return send(message.c_str(), message.length(), PACKET_NORMAL);
+}
+
+int Packetizer::send_mode(String message, uint8_t mode=PACKET_NORMAL) {
   return send(message.c_str(), message.length(), mode);
 }
 
-int Packetizer::debug(byte * message, size_t message_length) {
+int Packetizer::log(byte * message, size_t message_length) {
   return send(message, message_length, PACKET_USER_LOG);
 }
 
-int Packetizer::debug(String message) {
+int Packetizer::log(String message) {
   return send(message.c_str(), message.length(), PACKET_USER_LOG);
 }
 
@@ -55,7 +72,7 @@ int Packetizer::receive(byte * out, uint8_t * out_length) {
     stream->readBytes(&next_byte, 1);
     if (next_byte == 0x00) {
       if (packet_started) {
-        send("Incomplete packet", PACKET_RX_ERR);
+        send_mode("Incomplete packet", PACKET_RX_ERR);
         send(out, *out_length, PACKET_RX_ERR);
       }
       *out_length = 0;
@@ -64,7 +81,7 @@ int Packetizer::receive(byte * out, uint8_t * out_length) {
       continue;
     }
     if (!packet_started) {
-      send("Unexpected byte", PACKET_RX_ERR);
+      send_mode("Unexpected byte", PACKET_RX_ERR);
       send(&next_byte, 1, PACKET_RX_ERR);
       continue;
     }
@@ -86,9 +103,10 @@ int Packetizer::unstuff(byte * bytes, uint8_t out_length) {
           i = 0;
   while (i < out_length) {
     sequence_length = bytes[i];
-    while (sequence_length--) {
+    while (sequence_length > 1) {
       bytes[i] = bytes[i+1];
       i += 1;
+      sequence_length -= 1;
     }
     bytes[i] = 0x00;
     i += 1;

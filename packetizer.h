@@ -16,9 +16,9 @@ class Packetizer {
   int
     receive(byte * out, uint8_t * out_length),
     send(byte * message, size_t message_length, uint8_t mode=PACKET_NORMAL),
-    send(String message, uint8_t mode=PACKET_NORMAL),
-    debug(byte * message, size_t message_length),
-    debug(String message);
+    send(String message),
+    log(byte * message, size_t message_length),
+    log(String message);
 
   template < typename T > T &put(T &t) {
     send((uint8_t*)&t, sizeof(T));
@@ -27,7 +27,8 @@ class Packetizer {
 
  private:
   int
-    unstuff(byte * bytes, uint8_t out_length);
+    unstuff(byte * bytes, uint8_t out_length),
+    send_mode(String message, uint8_t mode=PACKET_NORMAL);
 
   Stream
     *stream;
