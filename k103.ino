@@ -1,19 +1,3 @@
-#include <EEPROM.h>
-#include "packetizer.h"
-
-#define BOLEX_SWITCH  12 // pulls down
-#define BOLEX_SHUTTER 8  // active low
-#define K103_ADVANCE  4  // active high "drive"
-#define K103_REVERSE  7  // active low
-#define K103_TAKEUP   9  // active high???
-#define K103_FWD_SW   2  // pulls down
-#define K103_REV_SW   3  // pulls down
-
-#define K103_FRAME_TIME 1200  // ms
-#define BOLEX_FRAME_TIME 800  // ms
-#define FRAME_UPDATE_THROTTLE 60000  // ms, save eeprom wear for higher data loss risk
-
-
 /**
  * K-103 control system
  * rewired for AC isolation and a bit of automation by phil for madi, 2019
@@ -38,20 +22,14 @@
  *    N => always 0
  * 
  * - get film
- *    DC1 '?' 'C|P'N
+ *    DC1 '?' 'C|P'
  * 
  * Frames (DC2)
- * - bolex: capture frames
- *    DC2 '*' N
- * 
- * - k103: advance frames
- *    DC2 'F' N
- * 
- * - k103: reverse frames
- *    DC2 'R' N
+ * - capture frames
+ *    DC2 '!' 'C|P' N
  * 
  * - get frame number
- *    DC2 '?'
+ *    DC2 '?' 'C|P'
  * 
  * EEPROM shape
  * 
@@ -64,12 +42,30 @@
  * 
  */
 
+#include <EEPROM.h>
+#include "packetizer.h"
+
+#define BOLEX_SWITCH  12 // pulls down
+#define BOLEX_SHUTTER 8  // active low
+#define K103_ADVANCE  4  // active high "drive"
+#define K103_REVERSE  7  // active low
+#define K103_TAKEUP   9  // active high???
+#define K103_FWD_SW   2  // pulls down
+#define K103_REV_SW   3  // pulls down
+
+#define K103_TAKEUP_DRIVE 16  // pwm level
+#define K103_TAKEUP_ACCEL 1   // ms / pwm-level
+#define K103_TAKEUP_SPINDOWN 2000  // ms
+#define K103_RELAY_SETTLE 10  // ms
+#define K103_FRAME_TIME 1200  // ms
+#define BOLEX_FRAME_TIME 800  // ms
+#define FRAME_UPDATE_THROTTLE 60000  // ms, save eeprom wear for higher data loss risk
+
 #define EEP_BOLEX_OFFSET   0
 #define EEP_K103_OFFSET   40
 
 #define ASCII_DC1 0x11
 #define ASCII_DC2 0x12
-
 
 // reels
 #define CMD_LOAD_BOLEX 0x00
@@ -84,36 +80,6 @@
 #define CMD_REV_K103   0x19
 
 
-//template< typename T > T &getFromFrame(Framer &f, uint8_t len, T &t) {
-////  assert(
-//  Serial.readBytes((uint8_t*)&t, sizeof(T));
-//  return t;
-//}
-//
-//template < typename T > T &putToFrame(Framer &f, T &t) {
-//  Serial.write((uint8_t*)&t, sizeof(T));
-//  return t;
-//}
-
-
-//void Framer::handle_command(byte command, byte * data, uint8_t data_length) {
-//  switch (command) {
-//  case RX_ECHO:
-//    write(TX_LOG_FRAMER, "echo:", 5);
-//    write(TX_LOG_FRAMER, data, data_length);
-//    break;
-//  case CMD_LOAD_BOLEX:
-//    print("suuuuuup");
-//    break;
-//  default:
-//    print(TX_LOG_FRAMER, "unrecognized command:");
-//    print(String(command, HEX));
-//  }
-//}
-//
-//Framer f = Framer(&Serial);
-
-
 Packetizer pk = Packetizer(&Serial);
 
 
@@ -124,6 +90,7 @@ struct Reel {
   long frame;
 };
 
+
 Reel bolex;
 Reel k103;
 boolean bolex_frame_dirty = false;
@@ -131,16 +98,15 @@ boolean k103_frame_dirty = false;
 unsigned long bolex_last_frame_save = 0 - FRAME_UPDATE_THROTTLE;
 unsigned long k103_last_frame_save = 0 - FRAME_UPDATE_THROTTLE;
 
-void update_frame(Reel * r, int n) {
-  r->frame += n;
-  if (r == &bolex) {
-    bolex_frame_dirty = true;
-  } else if (r == &k103) {
-    k103_frame_dirty = true;
-  } else {
-    Serial.println("invlalid reel specified for frame update");
-  }
-}
+char frame_advance_device = 0x00;
+long frame_advance_current;
+long frame_advance_target;
+unsigned long frame_advance_last_update = 0;
+
+int k103_drive_current = 0;
+int k103_drive_target = 0;
+unsigned long k103_drive_last_set = 0;
+
 
 bool _persist_reel_frame(unsigned long now, Reel * r, boolean * dirty,
                          unsigned long * last_frame_save, uint16_t eep_offset,
@@ -150,6 +116,7 @@ bool _persist_reel_frame(unsigned long now, Reel * r, boolean * dirty,
     EEPROM.put(eep_offset + 28, r->frame);
     *dirty = false;
     *last_frame_save = now;
+    pk.log("persisted reel frame");
   }
   return *dirty;
 }
@@ -157,6 +124,178 @@ bool persist_frames(boolean ignore_throttle=false) {
   unsigned long now = millis();
   _persist_reel_frame(now, &bolex, &bolex_frame_dirty, &bolex_last_frame_save, EEP_BOLEX_OFFSET, ignore_throttle);
   _persist_reel_frame(now, &k103, &k103_frame_dirty, &k103_last_frame_save, EEP_K103_OFFSET, ignore_throttle);
+}
+
+void start_takeup(bool forward, unsigned long now) {
+  k103_drive_target = (forward ? 1 : -1) * K103_TAKEUP_DRIVE;
+  k103_drive_last_set = now;
+}
+
+void update_takeup(unsigned long now) {
+  unsigned long dt = now - k103_drive_last_set;
+  bool takeup_is_forward = digitalRead(K103_REVERSE) == HIGH; // output is active-low
+  bool target_forward = k103_drive_target >= 0;
+  bool right_direction = takeup_is_forward == target_forward;
+  bool up_to_speed = k103_drive_current == k103_drive_target;
+  if (right_direction && up_to_speed) {
+    // then spin-down
+    if (dt >= K103_TAKEUP_SPINDOWN && k103_drive_target != 0) {
+      pk.log("Takeup spinning down...");
+      k103_drive_target = 0;
+      k103_drive_last_set = now;
+    }
+    return;
+  }
+
+  // deal with direction relay first
+  if (k103_drive_current == 0 && !up_to_speed) {
+    if (right_direction) {
+      if (dt < K103_RELAY_SETTLE) {
+        return;
+      }
+    } else {  // !right_direction
+      pk.log("Reversing k103 drive...");
+      digitalWrite(K103_REVERSE, target_forward);  // active-low
+      k103_drive_last_set = now;
+      return;
+    }
+  }
+
+  // then acceleration
+  if (dt < K103_TAKEUP_ACCEL) {
+    return;
+  } else {
+    if (!up_to_speed) {
+      bool faster = abs(k103_drive_current) < abs(k103_drive_target);
+      int adjustment = (faster ? 1 : -1) * (target_forward ? 1 : -1) * (right_direction ? 1 : -1);
+      k103_drive_current += adjustment;
+      pk.log("Adjusting takeup drive:");
+      pk.log(String(k103_drive_current, DEC));
+      analogWrite(K103_TAKEUP, abs(k103_drive_current));
+      k103_drive_last_set = now;
+      return;
+    }
+  }
+}
+
+bool takeup_ready(unsigned long now) {
+  if (k103_drive_current == 0) {
+    return false;
+  }
+  bool takeup_is_forward = digitalRead(K103_REVERSE) == HIGH; // output is active-low
+  bool target_forward = k103_drive_target >= 0;
+  if (takeup_is_forward != target_forward) {
+    return false;
+  }
+  if (k103_drive_current != k103_drive_target) {
+    return false;
+  }
+  k103_drive_last_set = now;
+  return true;
+}
+
+void update_advances(unsigned long now) {
+  unsigned long dt = now - frame_advance_last_update;
+  Reel * r;
+  unsigned long frame_timeout;
+  int frame_pin;
+  switch (frame_advance_device) {
+  case 'P':
+    if (!takeup_ready(now)) {
+      return;
+    }
+    r = &k103;
+    frame_timeout = K103_FRAME_TIME;
+    break;
+  case 'C':
+    r = &bolex;
+    frame_timeout = BOLEX_FRAME_TIME;
+    break;
+  case 0x00:
+    return;
+  default:
+    pk.log("invalid frame advance device");
+    pk.log(frame_advance_device);
+    return;
+  }
+  if (dt < frame_timeout) {
+    return;
+  }
+  if (frame_advance_current == frame_advance_target) {
+    frame_advance_device = 0x00;
+    persist_frames(true);
+    pk.log("advance frames: done");
+    return;
+  }
+  bool reverse = frame_advance_target < 0;
+  int incr = reverse ? -1 : 1;
+  frame_advance_current += incr;
+
+  if (frame_advance_device == 'C') {
+    digitalWrite(BOLEX_SHUTTER, LOW);
+    delay(60);
+    digitalWrite(BOLEX_SHUTTER, HIGH);
+  } else {
+    digitalWrite(K103_ADVANCE, HIGH);
+    delay(30);
+    digitalWrite(K103_ADVANCE, LOW);
+  }
+  update_frame(r, incr);
+  
+//  for (uint8_t i = 0; i < n; i++) {
+//    digitalWrite(BOLEX_SHUTTER, LOW);
+//    delay(60);
+//    digitalWrite(BOLEX_SHUTTER, HIGH);
+//    update_frame(r, 1);
+//    delay(BOLEX_FRAME_TIME);
+//  }
+  pk.log("advance frame");
+  pk.log(String(frame_advance_current, DEC));
+  frame_advance_last_update = now;
+}
+
+
+void advance_k103(int n, unsigned long now) {
+  if (frame_advance_device != 0x00) {
+    pk.log("cannot advance k103: busy");
+    return;
+  }
+  if (n == 0) {
+    pk.log("k103 got invalid 'advance 0'");
+    return;
+  }
+  start_takeup(n > 0, now);
+  frame_advance_device = 'P';
+  frame_advance_target = n;
+  frame_advance_current = 0;
+  frame_advance_last_update = now - K103_FRAME_TIME;
+}
+
+void advance_bolex(int n, unsigned long now) {
+  if (frame_advance_device != 0x00) {
+    pk.log("cannot advance bolex: busy");
+    return;
+  }
+  if (n == 0) {
+    pk.log("bolex got invalid 'advance 0'");
+    return;
+  }
+  frame_advance_device = 'C';
+  frame_advance_target = n;
+  frame_advance_current = 0;
+  frame_advance_last_update = now - BOLEX_FRAME_TIME;
+}
+
+
+void update_frame(Reel * r, int n) {
+  r->frame += n;
+  if (r == &bolex) {
+    bolex_frame_dirty = true;
+  } else if (r == &k103) {
+    k103_frame_dirty = true;
+  } else {
+    pk.log("invlalid reel specified for frame update");
+  }
 }
 
 void restore_reel_state(Reel * r, uint16_t eep_offset) {
@@ -198,17 +337,11 @@ void setup() {
 
   Serial.begin(9600);
 //  Serial.println("hello");
+//  dump_eep();
 
   restore_reel_state(&bolex, EEP_BOLEX_OFFSET);
   restore_reel_state(&k103, EEP_K103_OFFSET);
-
-//  dump_eep();
-//  pk.log("bolex");
-//  dump_eep(EEP_BOLEX_OFFSET, EEP_BOLEX_OFFSET + 32);
-//  pk.log("k103");
-//  dump_eep(EEP_K103_OFFSET, EEP_K103_OFFSET + 32);
   
-
 //  TCCR1B = TCCR1B & B11111000 | B00000010; // timer1 PWM frequency 3921.16 Hz
 }
 
@@ -217,51 +350,16 @@ void fwd_isr() {
 void rev_isr() {
 }
 
-void capture(Reel * r, uint8_t n) {
-  for (uint8_t i = 0; i < n; i++) {
-    digitalWrite(BOLEX_SHUTTER, LOW);
-    delay(60);
-    digitalWrite(BOLEX_SHUTTER, HIGH);
-    update_frame(r, 1);
-    delay(BOLEX_FRAME_TIME);
-  }
-  persist_frames(true);
-}
 
-void forward(Reel * r, uint8_t n) {
-  if (digitalRead(K103_REVERSE) == LOW) {
-    digitalWrite(K103_REVERSE, HIGH);
-    delay(30);
+void advance(char c, int n) {
+  if (c == 'C') {
+    advance_bolex(n, millis());
+  } else if (c == 'P') {
+    advance_k103(n, millis());
+  } else {
+    pk.log("invalid c for advance");
+    pk.log(c);
   }
-  analogWrite(K103_TAKEUP, 127);
-  for (uint8_t i = 0; i < n; i++) {
-    digitalWrite(K103_ADVANCE, HIGH);
-    delay(30);
-    digitalWrite(K103_ADVANCE, LOW);
-    update_frame(r, 1);
-    delay(K103_FRAME_TIME);
-  }
-  persist_frames(true);
-  digitalWrite(K103_TAKEUP, LOW);
-  Serial.print("advanced frames: ");
-  Serial.println(n);
-}
-
-void reverse(Reel * r, uint8_t n) {
-  if (digitalRead(K103_REVERSE) == HIGH) {
-    digitalWrite(K103_REVERSE, LOW);
-    delay(30);
-  }
-  analogWrite(K103_TAKEUP, 127);
-  for (uint8_t i = 0; i < n; i++) {
-    digitalWrite(K103_ADVANCE, HIGH);
-    delay(30);
-    digitalWrite(K103_ADVANCE, LOW);
-    update_frame(r, -1);
-    delay(K103_FRAME_TIME);
-  }
-  persist_frames(true);
-  digitalWrite(K103_TAKEUP, LOW);
 }
 
 void handle_load_reel(Reel * r, byte * info, uint16_t eep_offset) {
@@ -273,14 +371,26 @@ void handle_load_reel(Reel * r, byte * info, uint16_t eep_offset) {
   load_film(r, eep_offset, ts, desc, len, frame);
 }
 
-
 void send_reel_info(char c, Reel * r) {
-  byte info[35];
+  byte info[3 + sizeof(Reel)];
   info[0] = ASCII_DC1;
   info[1] = 'i';
   info[2] = c;
   memcpy(info + 3, r, sizeof(Reel));
-  pk.send(info, sizeof(Reel) + 3);
+  pk.send(info, 3 + sizeof(Reel));
+}
+
+void send_frame_no(char c, Reel * r) {
+  byte info[3 + sizeof(long)];
+  info[0] = ASCII_DC2;
+  info[1] = 'i';
+  info[2] = c;
+  memcpy(info + 3, &(r->frame), sizeof(long));
+  pk.send(info, 3 + sizeof(long));
+}
+
+void send_busy() {
+  pk.log("busy");
 }
 
 void get_packet() {
@@ -301,6 +411,9 @@ void get_packet() {
       }
       return;
     case '!':
+      if (frame_advance_device != 0x00) {
+        return send_busy();
+      }
       if (rec[2] == 'C') {
         handle_load_reel(&bolex, rec + 3, EEP_BOLEX_OFFSET);
       } else if (rec[2] == 'P') {
@@ -317,14 +430,22 @@ void get_packet() {
     break;
   case ASCII_DC2:  // frame command
     switch(rec[1]) {
-    case '*':
-      return capture(&bolex, rec[2]);
-    case 'F':
-      return forward(&k103, rec[2]);
-    case 'R':
-      return reverse(&k103, rec[2]);
+    case '!':
+      if (frame_advance_device != 0x00) {
+        return send_busy();
+      }
+      advance(rec[2], *(int*)(rec + 3));
+      return;
     case '?':
-      return pk.log("'?' not yet implemented");
+      if (rec[2] == 'C') {
+        send_frame_no('C', &bolex);
+      } else if (rec[2] == 'P') {
+        send_frame_no('P', &k103);
+      } else {
+        pk.log("expected 'C' or 'P' for '?'");
+        pk.log(rec[2], 1);
+      }
+      return;
     default:
       pk.log("bad frame command byte");
       pk.log(String(rec[0], DEC));
@@ -336,13 +457,14 @@ void get_packet() {
   }
 }
 
-
-
 void loop() {
+  unsigned long now = millis();
   if (pk.might_have_something()) {
     get_packet();
   }
+  update_takeup(now);
+  update_advances(now);
   persist_frames();
-  delay(10);
+//  delay(10);
 }
 
