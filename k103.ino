@@ -53,9 +53,9 @@
 #define K103_FWD_SW   2  // pulls down
 #define K103_REV_SW   3  // pulls down
 
-#define K103_TAKEUP_DRIVE 16  // pwm level
-#define K103_TAKEUP_ACCEL 1   // ms / pwm-level
-#define K103_TAKEUP_SPINDOWN 2000  // ms
+#define K103_TAKEUP_DRIVE 127 // pwm level
+#define K103_TAKEUP_ACCEL 6   // ms per pwm-level
+#define K103_TAKEUP_SPINDOWN 10000  // ms
 #define K103_RELAY_SETTLE 10  // ms
 #define K103_FRAME_TIME 1200  // ms
 #define BOLEX_FRAME_TIME 800  // ms
@@ -127,6 +127,7 @@ bool persist_frames(boolean ignore_throttle=false) {
 }
 
 void start_takeup(bool forward, unsigned long now) {
+  pk.log("takeup spin up");
   k103_drive_target = (forward ? 1 : -1) * K103_TAKEUP_DRIVE;
   k103_drive_last_set = now;
 }
@@ -140,7 +141,7 @@ void update_takeup(unsigned long now) {
   if (right_direction && up_to_speed) {
     // then spin-down
     if (dt >= K103_TAKEUP_SPINDOWN && k103_drive_target != 0) {
-      pk.log("Takeup spinning down...");
+      pk.log("takeup spin down");
       k103_drive_target = 0;
       k103_drive_last_set = now;
     }
@@ -154,7 +155,7 @@ void update_takeup(unsigned long now) {
         return;
       }
     } else {  // !right_direction
-      pk.log("Reversing k103 drive...");
+      pk.log("switch k103 drive direction");
       digitalWrite(K103_REVERSE, target_forward);  // active-low
       k103_drive_last_set = now;
       return;
@@ -169,10 +170,11 @@ void update_takeup(unsigned long now) {
       bool faster = abs(k103_drive_current) < abs(k103_drive_target);
       int adjustment = (faster ? 1 : -1) * (target_forward ? 1 : -1) * (right_direction ? 1 : -1);
       k103_drive_current += adjustment;
-      pk.log("Adjusting takeup drive:");
-      pk.log(String(k103_drive_current, DEC));
       analogWrite(K103_TAKEUP, abs(k103_drive_current));
       k103_drive_last_set = now;
+      if (k103_drive_current == k103_drive_target) {
+        pk.log(k103_drive_current == 0 ? "takeup at rest" : "takeup at speed");
+      }
       return;
     }
   }
@@ -241,14 +243,7 @@ void update_advances(unsigned long now) {
     digitalWrite(K103_ADVANCE, LOW);
   }
   update_frame(r, incr);
-  
-//  for (uint8_t i = 0; i < n; i++) {
-//    digitalWrite(BOLEX_SHUTTER, LOW);
-//    delay(60);
-//    digitalWrite(BOLEX_SHUTTER, HIGH);
-//    update_frame(r, 1);
-//    delay(BOLEX_FRAME_TIME);
-//  }
+
   pk.log("advance frame");
   pk.log(String(frame_advance_current, DEC));
   frame_advance_last_update = now;
