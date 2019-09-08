@@ -261,10 +261,7 @@ void update_advances(unsigned long now) {
     delay(30);
     digitalWrite(K103_ADVANCE, LOW);
   }
-  update_frame(r, incr);
-
-  pk.log("advance frame");
-  pk.log(String(frame_advance_current, DEC));
+  update_frame(frame_advance_device, r, incr);
   frame_advance_last_update = now;
 }
 
@@ -301,7 +298,7 @@ void advance_bolex(int n, unsigned long now) {
 }
 
 
-void update_frame(Reel * r, int n) {
+void update_frame(char c, Reel * r, int n) {
   r->frame += n;
   if (r == &bolex) {
     bolex_frame_dirty = true;
@@ -310,6 +307,7 @@ void update_frame(Reel * r, int n) {
   } else {
     pk.log("invlalid reel specified for frame update");
   }
+  send_frame_no(c, r);
 }
 
 void restore_reel_state(Reel * r, uint16_t eep_offset) {
