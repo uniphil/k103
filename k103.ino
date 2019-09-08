@@ -107,6 +107,16 @@ int k103_drive_current = 0;
 int k103_drive_target = 0;
 unsigned long k103_drive_last_set = 0;
 
+void dump_takeup(unsigned long now) {
+  unsigned long dt = now - k103_drive_last_set;
+  pk.log("Takup dump:");
+  pk.log("dt:");
+  pk.log(String(dt, DEC));
+  pk.log("drive current:");
+  pk.log(String(k103_drive_current, DEC));
+  pk.log("drive target:");
+  pk.log(String(k103_drive_target, DEC));
+}
 
 bool _persist_reel_frame(unsigned long now, Reel * r, boolean * dirty,
                          unsigned long * last_frame_save, uint16_t eep_offset,
@@ -127,16 +137,22 @@ bool persist_frames(boolean ignore_throttle=false) {
 }
 
 void start_takeup(bool forward, unsigned long now) {
-  pk.log("takeup spin up");
-  k103_drive_target = (forward ? 1 : -1) * K103_TAKEUP_DRIVE;
   k103_drive_last_set = now;
+  int target = (forward ? 1 : -1) * K103_TAKEUP_DRIVE;
+  if (k103_drive_target == target) {
+    pk.log("takeup already at speed");
+  } else {
+    pk.log("takeup spin up");
+    k103_drive_target = target;
+  }
 }
 
 void update_takeup(unsigned long now) {
   unsigned long dt = now - k103_drive_last_set;
-  bool takeup_is_forward = digitalRead(K103_REVERSE) == HIGH; // output is active-low
-  bool target_forward = k103_drive_target >= 0;
-  bool right_direction = takeup_is_forward == target_forward;
+  bool takeup_is_forward = k103_drive_current > 0;
+  bool target_forward = k103_drive_target > 0;
+  bool relay_forward = digitalRead(K103_REVERSE) == HIGH;  // active-low
+  bool right_direction = target_forward == relay_forward;
   bool up_to_speed = k103_drive_current == k103_drive_target;
   if (right_direction && up_to_speed) {
     // then spin-down
@@ -167,13 +183,22 @@ void update_takeup(unsigned long now) {
     return;
   } else {
     if (!up_to_speed) {
-      bool faster = abs(k103_drive_current) < abs(k103_drive_target);
-      int adjustment = (faster ? 1 : -1) * (target_forward ? 1 : -1) * (right_direction ? 1 : -1);
+      int adjustment;
+      if (k103_drive_target == 0) {
+        adjustment = takeup_is_forward ? -1 : 1;
+      } else {
+        adjustment = (k103_drive_target > 0) ? 1 : -1;
+      }
       k103_drive_current += adjustment;
       analogWrite(K103_TAKEUP, abs(k103_drive_current));
       k103_drive_last_set = now;
       if (k103_drive_current == k103_drive_target) {
-        pk.log(k103_drive_current == 0 ? "takeup at rest" : "takeup at speed");
+        if (k103_drive_current == 0) {
+          digitalWrite(K103_REVERSE, HIGH);  // active-low
+          pk.log("takeup at rest");
+        } else {
+          pk.log("takeup at speed");
+        }
       }
       return;
     }
@@ -182,11 +207,6 @@ void update_takeup(unsigned long now) {
 
 bool takeup_ready(unsigned long now) {
   if (k103_drive_current == 0) {
-    return false;
-  }
-  bool takeup_is_forward = digitalRead(K103_REVERSE) == HIGH; // output is active-low
-  bool target_forward = k103_drive_target >= 0;
-  if (takeup_is_forward != target_forward) {
     return false;
   }
   if (k103_drive_current != k103_drive_target) {
@@ -346,11 +366,11 @@ void rev_isr() {
 }
 
 
-void advance(char c, int n) {
+void advance(char c, int n, unsigned long now) {
   if (c == 'C') {
-    advance_bolex(n, millis());
+    advance_bolex(n, now);
   } else if (c == 'P') {
-    advance_k103(n, millis());
+    advance_k103(n, now);
   } else {
     pk.log("invalid c for advance");
     pk.log(c);
@@ -388,7 +408,7 @@ void send_busy() {
   pk.log("busy");
 }
 
-void get_packet() {
+void get_packet(unsigned long now) {
   byte rec[62];
   uint8_t len;
   pk.receive(rec, &len);
@@ -429,7 +449,7 @@ void get_packet() {
       if (frame_advance_device != 0x00) {
         return send_busy();
       }
-      advance(rec[2], *(int*)(rec + 3));
+      advance(rec[2], *(int*)(rec + 3), now);
       return;
     case '?':
       if (rec[2] == 'C') {
@@ -446,6 +466,14 @@ void get_packet() {
       pk.log(String(rec[0], DEC));
     }
     break;
+  case '_':
+    if (rec[1] == 'T') {
+      dump_takeup(now);
+    } else {
+      pk.log("unrecognied thing for dump");
+      pk.log(rec[1]);
+    }
+    return;
   default:
     pk.log("bad command byte");
     pk.log(String(rec[0], DEC));
@@ -455,7 +483,7 @@ void get_packet() {
 void loop() {
   unsigned long now = millis();
   if (pk.might_have_something()) {
-    get_packet();
+    get_packet(now);
   }
   update_takeup(now);
   update_advances(now);
