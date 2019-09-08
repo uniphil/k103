@@ -130,8 +130,7 @@ bool _persist_reel_frame(unsigned long now, Reel * r, boolean * dirty,
   }
   return *dirty;
 }
-bool persist_frames(boolean ignore_throttle=false) {
-  unsigned long now = millis();
+bool persist_frames(unsigned long now, boolean ignore_throttle=false) {
   _persist_reel_frame(now, &bolex, &bolex_frame_dirty, &bolex_last_frame_save, EEP_BOLEX_OFFSET, ignore_throttle);
   _persist_reel_frame(now, &k103, &k103_frame_dirty, &k103_last_frame_save, EEP_K103_OFFSET, ignore_throttle);
 }
@@ -245,7 +244,7 @@ void update_advances(unsigned long now) {
   }
   if (frame_advance_current == frame_advance_target) {
     frame_advance_device = 0x00;
-    persist_frames(true);
+    persist_frames(now, true);
     pk.log("advance frames: done");
     return;
   }
@@ -487,7 +486,7 @@ void loop() {
   }
   update_takeup(now);
   update_advances(now);
-  persist_frames();
+  persist_frames(now);
 //  delay(10);
 }
 
