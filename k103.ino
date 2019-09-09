@@ -116,6 +116,9 @@ void dump_takeup(unsigned long now) {
   pk.log(String(k103_drive_current, DEC));
   pk.log("drive target:");
   pk.log(String(k103_drive_target, DEC));
+  pk.log("frame_advance_device:");
+  pk.log(frame_advance_device);
+  pk.log(String(frame_advance_device, DEC));
 }
 
 bool _persist_reel_frame(unsigned long now, Reel * r, boolean * dirty,
@@ -243,9 +246,9 @@ void update_advances(unsigned long now) {
     return;
   }
   if (frame_advance_current == frame_advance_target) {
+    send_advance_done(frame_advance_device, frame_advance_target);
     frame_advance_device = 0x00;
     persist_frames(now, true);
-    pk.log("advance frames: done");
     return;
   }
   bool reverse = frame_advance_target < 0;
@@ -262,6 +265,16 @@ void update_advances(unsigned long now) {
     digitalWrite(K103_ADVANCE, LOW);
   }
   update_frame(frame_advance_device, r, incr);
+  frame_advance_last_update = now;
+}
+
+
+void cancel_advances(unsigned long now) {
+  char running_device = frame_advance_device;
+  frame_advance_current = 0;
+  frame_advance_target = 0;
+  frame_advance_device = 0x00;
+  send_cancelled(running_device);
   frame_advance_last_update = now;
 }
 
@@ -401,8 +414,23 @@ void send_frame_no(char c, Reel * r) {
   pk.send(info, 3 + sizeof(long));
 }
 
+void send_advance_done(char c, long n) {
+  byte info[3 + sizeof(long)];
+  info[0] = ASCII_DC2;
+  info[1] = '.';
+  info[2] = c;
+  memcpy(info + 3, &n, sizeof(long));
+  pk.send(info, 3 + sizeof(long));
+}
+
+void send_cancelled(char c) {
+  byte info[3] = { ASCII_DC2, 'x', c };
+  pk.send(info, 3);
+}
+
 void send_busy() {
-  pk.log("busy");
+  byte info[2] = { 'B', frame_advance_device };
+  pk.send(info, 2);
 }
 
 void get_packet(unsigned long now) {
@@ -442,13 +470,23 @@ void get_packet(unsigned long now) {
     break;
   case ASCII_DC2:  // frame command
     switch(rec[1]) {
-    case '!':
+    case '!':  // capture! /advance
       if (frame_advance_device != 0x00) {
-        return send_busy();
+        send_busy();
+        return;
       }
+      pk.log("ok try advance...");
       advance(rec[2], *(int*)(rec + 3), now);
       return;
-    case '?':
+    case 'x':  // cancel
+      if (frame_advance_device == 0x00) {
+        pk.log("nothing to cancel.");
+        return;
+      }
+      pk.log("cancelling...");
+      cancel_advances(now);
+      return;
+    case '?':  // query
       if (rec[2] == 'C') {
         send_frame_no('C', &bolex);
       } else if (rec[2] == 'P') {
